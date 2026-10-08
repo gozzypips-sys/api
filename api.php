@@ -22,8 +22,8 @@ $CONFIG = [
     'email_from'          => 'noreply@gozzygroup.com',
     'email_subject'       => 'New Project Inquiry — Gozzy Group',
 
-    'telegram_bot_token'  => 'YOUR_TELEGRAM_BOT_TOKEN_HERE',
-    'telegram_chat_id'    => 'YOUR_TELEGRAM_CHAT_ID_HERE',
+    'telegram_bot_token'  => '8578906720:AAGRzce4EXBjYlxl4AjiGNiWV5PiDjn-iwE',
+    'telegram_chat_id'    => '8149610939',
 
     'discord_webhook_url' => 'YOUR_DISCORD_WEBHOOK_URL_HERE',
 
