@@ -1,8 +1,7 @@
 <?php
 /**
  * Gozzy Group — API Endpoint
- * Handles: Contact form, Telegram webhook, Discord notifications
- * Deploy this on a PHP host (Hostinger, Railway, Render, etc.)
+ * Handles: Contact form, Telegram webhook, Discord notifications, Email (Resend)
  */
 
 header('Access-Control-Allow-Origin: *');
@@ -15,20 +14,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 }
 
 // ============================================================
-// 1. CONFIGURATION
+// 1. CONFIGURATION — REPLACE ALL PLACEHOLDERS
 // ============================================================
 $CONFIG = [
+    // Email (via Resend)
     'email_to'            => 'Gozzypips@gmail.com',
-    'email_from'          => 'noreply@gozzygroup.com',
+    'email_from'          => 'Gozzy Group <onboarding@resend.dev>', // swap after domain verified
     'email_subject'       => 'New Project Inquiry — Gozzy Group',
+    'resend_api_key'      => 're_RziWNsSZ_AEFHsxjgJapaVbMZkmJGx5YT',
 
-    'telegram_bot_token'  => '8578906720:AAGRzce4EXBjYlxl4AjiGNiWV5PiDjn-iwE',
+    // Telegram — REVOKE the old token first!
+    'telegram_bot_token'  => '8578906720:AAEMisb6MTZ7uOhdMFWAUzwr5ohwQ57r-sw',
     'telegram_chat_id'    => '8149610939',
 
+    // Discord — REGENERATE the webhook first!
     'discord_webhook_url' => 'https://discord.com/api/webhooks/1557688599766507562/AKVs9BqSTRQmd5F_IsPKg3ZKNtoSBraN6QJflA814tBm1C5uYJ3HPz2A2UGIZEwJ3l2C',
 
     'telegram_webhook_secret' => 'gozzysecret123',
-    'gozzy_group_chat_id'     => '-5109563346',
+    'gozzy_group_chat_id'     => '-5109563346', // must start with -100
 
     'rate_limit_seconds' => 60,
     'rate_limit_file'    => sys_get_temp_dir() . '/gozzy_rate.json',
@@ -51,15 +54,12 @@ function jsonResponse($data, $code = 200) {
 }
 
 function isRateLimited($ip, $seconds, $file) {
-    $now = time();
-    $data = [];
+    $now = time(); $data = [];
     if (file_exists($file)) {
         $raw = @file_get_contents($file);
         if ($raw) $data = json_decode($raw, true) ?: [];
     }
-    foreach ($data as $key => $ts) {
-        if ($now - $ts > $seconds * 10) unset($data[$key]);
-    }
+    foreach ($data as $k => $ts) if ($now - $ts > $seconds * 10) unset($data[$k]);
     if (isset($data[$ip]) && ($now - $data[$ip]) < $seconds) return true;
     $data[$ip] = $now;
     @file_put_contents($file, json_encode($data), LOCK_EX);
@@ -67,19 +67,41 @@ function isRateLimited($ip, $seconds, $file) {
 }
 
 function logInquiry($logFile, $entry) {
-    $line = '[' . date('Y-m-d H:i:s') . '] ' . json_encode($entry) . PHP_EOL;
-    @file_put_contents($logFile, $line, FILE_APPEND | LOCK_EX);
+    @file_put_contents($logFile, '[' . date('Y-m-d H:i:s') . '] ' . json_encode($entry) . PHP_EOL, FILE_APPEND | LOCK_EX);
+}
+
+function httpPost($url, $data, $headers = ['Content-Type: application/json']) {
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_POST           => true,
+        CURLOPT_POSTFIELDS     => json_encode($data),
+        CURLOPT_HTTPHEADER     => $headers,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT        => 15,
+    ]);
+    $result = curl_exec($ch);
+    $err = curl_error($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    if ($err) error_log("Gozzy cURL error: $err");
+    if ($httpCode >= 400) error_log("Gozzy HTTP $httpCode from $url — response: $result");
+    return $result;
 }
 
 function sendTelegram($botToken, $chatId, $text, $parseMode = 'HTML') {
-    if (empty($botToken) || empty($chatId)) return false;
+    if (empty($botToken) || empty($chatId)) {
+        error_log("Gozzy Telegram skipped: missing token or chat ID");
+        return false;
+    }
     $url = "https://api.telegram.org/bot{$botToken}/sendMessage";
-    return httpPost($url, [
+    $result = httpPost($url, [
         'chat_id' => $chatId,
         'text' => $text,
         'parse_mode' => $parseMode,
         'disable_web_page_preview' => true,
     ]);
+    error_log("Gozzy Telegram → $chatId response: $result");
+    return $result;
 }
 
 function sendDiscord($webhookUrl, $content) {
@@ -87,20 +109,24 @@ function sendDiscord($webhookUrl, $content) {
     return httpPost($webhookUrl, ['content' => $content]);
 }
 
-function httpPost($url, $data) {
-    $ch = curl_init($url);
-    curl_setopt_array($ch, [
-        CURLOPT_POST => true,
-        CURLOPT_POSTFIELDS => json_encode($data),
-        CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT => 10,
-        CURLOPT_SSL_VERIFYPEER => true,
+function sendEmail($apiKey, $to, $from, $subject, $body, $replyTo = null) {
+    if (empty($apiKey)) {
+        error_log("Gozzy email skipped: missing Resend API key");
+        return false;
+    }
+    $payload = [
+        'from'    => $from,
+        'to'      => [$to],
+        'subject' => $subject,
+        'text'    => $body,
+    ];
+    if ($replyTo) $payload['reply_to'] = $replyTo;
+
+    $result = httpPost('https://api.resend.com/emails', $payload, [
+        'Authorization: Bearer ' . $apiKey,
+        'Content-Type: application/json',
     ]);
-    $result = curl_exec($ch);
-    $err = curl_error($ch);
-    curl_close($ch);
-    if ($err) { error_log("Gozzy cURL error: $err"); return false; }
+    error_log("Gozzy Resend response: $result");
     return $result;
 }
 
@@ -147,33 +173,29 @@ if (isset($_GET['webhook']) && $_GET['webhook'] === 'telegram') {
         } elseif ($text === '/contact') {
             sendTelegram($CONFIG['telegram_bot_token'], $chatId,
                 "📬 <b>Contact Gozzy Group</b>\n\n" .
-                "📧 Email: {$CONFIG['public_email']}\n" .
-                "📱 Phone: {$CONFIG['public_phone_display']}\n" .
-                "💬 Telegram: <a href=\"{$CONFIG['public_telegram']}\">Chat with us</a>\n" .
-                "🌐 Web: {$CONFIG['public_website']}"
+                "📧 {$CONFIG['public_email']}\n📱 {$CONFIG['public_phone_display']}\n" .
+                "💬 <a href=\"{$CONFIG['public_telegram']}\">Chat</a>\n" .
+                "🌐 {$CONFIG['public_website']}"
             );
         } elseif ($text === '/project') {
             sendTelegram($CONFIG['telegram_bot_token'], $chatId,
-                "🚀 <b>Ready to start?</b>\n\n" .
-                "Visit our contact form:\n{$CONFIG['public_website']}/#contact"
+                "🚀 <b>Ready to start?</b>\n\n{$CONFIG['public_website']}/#contact"
             );
         } elseif ($text === '/group') {
             sendTelegram($CONFIG['telegram_bot_token'], $chatId,
-                "💬 <b>Gozzy Group Chat Room</b>\n\n" .
-                "Join the community: {$CONFIG['public_telegram']}"
+                "💬 <b>Gozzy Group Chat Room</b>\n\n{$CONFIG['public_telegram']}"
             );
         } else {
             if ($CONFIG['gozzy_group_chat_id'] && $chatId != $CONFIG['gozzy_group_chat_id']) {
-                $forwardText = "📩 <b>New message from {$firstName}</b>\n" .
-                               "Chat ID: <code>{$chatId}</code>\n\n" . $text;
-                sendTelegram($CONFIG['telegram_bot_token'], $CONFIG['gozzy_group_chat_id'], $forwardText);
+                sendTelegram($CONFIG['telegram_bot_token'], $CONFIG['gozzy_group_chat_id'],
+                    "📩 <b>New message from {$firstName}</b>\n<code>{$chatId}</code>\n\n{$text}"
+                );
             }
             sendTelegram($CONFIG['telegram_bot_token'], $chatId,
                 "Thanks for your message! A Gozzy Group team member will get back to you shortly."
             );
         }
     }
-
     jsonResponse(['ok' => true]);
 }
 
@@ -201,18 +223,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['form_type']) && $_POS
         jsonResponse(['status' => 'error', 'message' => 'Please enter a valid email address.'], 400);
     }
 
-    // Email
-    $body = "New Project Inquiry — Gozzy Group\n\n" .
-            "Name:     {$name}\nEmail:    {$email}\n" .
-            "Company:  {$company}\nService:  {$service}\n" .
-            "Budget:   {$budget}\nIP:       {$ip}\n\n" .
-            "Message:\n{$message}\n";
-    $headers = "From: {$CONFIG['email_from']}\r\n" .
-               "Reply-To: {$email}\r\n" .
-               "Content-Type: text/plain; charset=UTF-8\r\n";
-    @mail($CONFIG['email_to'], $CONFIG['email_subject'], $body, $headers);
+    // 1. Email via Resend
+    $emailBody =
+        "New Project Inquiry — Gozzy Group\n\n" .
+        "Name:     {$name}\nEmail:    {$email}\n" .
+        "Company:  {$company}\nService:  {$service}\n" .
+        "Budget:   {$budget}\nIP:       {$ip}\n\n" .
+        "Message:\n{$message}\n";
+    sendEmail(
+        $CONFIG['resend_api_key'],
+        $CONFIG['email_to'],
+        $CONFIG['email_from'],
+        $CONFIG['email_subject'],
+        $emailBody,
+        $email
+    );
 
-    // Telegram
+    // 2. Telegram
     sendTelegram($CONFIG['telegram_bot_token'], $CONFIG['telegram_chat_id'],
         "🚀 <b>New Project Inquiry — Gozzy Group</b>\n\n" .
         "<b>Name:</b> {$name}\n<b>Email:</b> {$email}\n" .
@@ -222,7 +249,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['form_type']) && $_POS
         "<b>Message:</b>\n{$message}"
     );
 
-    // Discord
+    // 3. Discord
     sendDiscord($CONFIG['discord_webhook_url'],
         "**🚀 New Project Inquiry — Gozzy Group**\n" .
         "**Name:** {$name}\n**Email:** {$email}\n" .
@@ -232,7 +259,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['form_type']) && $_POS
         "**Message:** {$message}"
     );
 
-    // Log
+    // 4. Log
     logInquiry($CONFIG['log_file'], [
         'name' => $name, 'email' => $email, 'company' => $company,
         'service' => $service, 'budget' => $budget, 'message' => $message,
