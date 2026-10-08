@@ -4,6 +4,10 @@
  * Handles: list, post testimonial, reply, delete (testimonial/reply)
  * Stored in: testimonials.json (next to this file)
  *
+ * Timestamps are stored as Unix milliseconds (JS-compatible).
+ * The frontend converts them into "3 months ago", "2 days ago", etc.
+ * and refreshes every 60s while the page is open.
+ *
  * Endpoints:
  *   GET  /testimonials.php             → list all
  *   POST /testimonials.php             → action based on form_type
@@ -24,10 +28,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 
 $TESTIMONIALS_FILE = __DIR__ . '/testimonials.json';
 
+// ============================================================
+// HELPERS
+// ============================================================
 function jsonOut($data, $code = 200) {
     http_response_code($code);
     header('Content-Type: application/json');
-    echo json_encode($data);
+    echo json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     exit;
 }
 
@@ -52,15 +59,20 @@ function saveData($file, $data) {
 }
 
 // ============================================================
-// SEED — Mr. Kind's testimonial (added once if file is empty)
+// SEED — Mr. Kind's testimonial
+// Uses a timestamp calculated as exactly 3 months ago from now.
+// On first load this is written into testimonials.json, so it
+// will always display as "3 months ago" and grow naturally.
 // ============================================================
+$SEED_TIMESTAMP = (time() - (90 * 24 * 60 * 60)) * 1000; // 90 days ago in ms
+
 $SEED = [
     'id'      => 'seed-mrkind',
     'name'    => 'Mr. Kind',
     'role'    => 'Business Owner · 2 Projects with Gozzy',
     'rating'  => 5,
     'message' => 'Thank you Gozzy Group — it feels easier to do my business now. The systems you built for me just work, and I don\'t have to think about them.',
-    'date'    => (time() - 172800) * 1000, // 2 days ago
+    'date'    => $SEED_TIMESTAMP,
     'replies' => [],
 ];
 
@@ -74,6 +86,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
     if (empty($data['items'])) {
         $data['items'][] = $SEED;
         saveData($TESTIMONIALS_FILE, $data);
+    } else {
+        // If Mr. Kind exists but has no date (or a bad date), fix it
+        foreach ($data['items'] as &$item) {
+            if (($item['id'] ?? '') === 'seed-mrkind') {
+                if (!isset($item['date']) || !is_numeric($item['date']) || $item['date'] <= 0) {
+                    $item['date'] = $SEED_TIMESTAMP;
+                }
+            }
+        }
+        unset($item);
     }
 
     // Sort newest first
@@ -89,7 +111,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $type = $_POST['form_type'] ?? '';
     $data = loadData($TESTIMONIALS_FILE);
 
-    // Ensure seed is always present if the store is empty
+    // Ensure Mr. Kind exists if store is empty
     if (empty($data['items'])) {
         $data['items'][] = $SEED;
     }
@@ -115,7 +137,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'role'    => $role,
             'rating'  => $rating,
             'message' => $message,
-            'date'    => time() * 1000,
+            'date'    => time() * 1000, // now, in ms
             'replies' => [],
         ];
         saveData($TESTIMONIALS_FILE, $data);
@@ -144,7 +166,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'name'    => $name,
                     'message' => $message,
                     'isAdmin' => $isAdmin,
-                    'date'    => time() * 1000,
+                    'date'    => time() * 1000, // now, in ms
                 ];
                 $found = true;
                 break;
