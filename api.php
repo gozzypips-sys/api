@@ -25,10 +25,10 @@ $CONFIG = [
     'telegram_bot_token'  => '8578906720:AAGRzce4EXBjYlxl4AjiGNiWV5PiDjn-iwE',
     'telegram_chat_id'    => '8149610939',
 
-    'discord_webhook_url' => 'YOUR_DISCORD_WEBHOOK_URL_HERE',
+    'discord_webhook_url' => 'https://discord.com/api/webhooks/1557688599766507562/AKVs9BqSTRQmd5F_IsPKg3ZKNtoSBraN6QJflA814tBm1C5uYJ3HPz2A2UGIZEwJ3l2C',
 
     'telegram_webhook_secret' => 'gozzysecret123',
-    'gozzy_group_chat_id'     => 'YOUR_GOZZY_GROUP_CHAT_ID_HERE',
+    'gozzy_group_chat_id'     => '-5109563346',
 
     'rate_limit_seconds' => 60,
     'rate_limit_file'    => sys_get_temp_dir() . '/gozzy_rate.json',
